@@ -1,15 +1,18 @@
 #! /bin/bash
 
-echo "# This command is meant to be used with your shell's eval function."
-echo "# Run 'eval \$(awslogin)' to set the AWS credential environment variables in your shell."
+# See the "CONFIG VARIABLES" section below.
+mode=config			# one of "environ" or "config"
+#aws_profile=default		# default from $AWS_PROFILE
+#arn=ARN			# default from "aws configure get arn --profile $aws_profile"
+#onepassword_item="1P Item"	# default from "aws configure get onepassword_item --profile $aws_profile"
+debug=0
 
-debug=1
-arn=MY_ARN
-op_item="My 1Password Item"
-
-# This script outputs some "export" commands that are meant to be evaled in
-# your shell.  You must already be authenticated with the 1Password op
-# command; if not, the command will exit with an error.
+# This script helps integrate 1Password TOTPs (time-based one-time passwords)
+# with AWS MFA authentication.  It has two modes: in "config" mode it edits
+# your AWS credentials file with your temporary credentials, while in
+# "environ" mode it outputs some commands to set the AWS credentials in your
+# environment.  You must already be authenticated with the 1Password "op
+# signin" command; if not, this script will exit with an error.
 #
 # To use this script you need to install awscli, jq, and 1password-cli.  The
 # 1password-cli cask installs op, the 1Password command-line client.
@@ -19,28 +22,107 @@ op_item="My 1Password Item"
 #
 # Instructions on logging in to the 1Password client for the first time are at:
 # https://support.1password.com/command-line-getting-started/
-
+#
 # Documentation for using the AWS client with MFA is at:
 # https://aws.amazon.com/premiumsupport/knowledge-center/authenticate-mfa-cli/
 
-# Find your ARN by logging in to the aws console, going to
-# https://console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials,
-# and look under "Assigned MFA device".
+# CONFIG VARIABLES
+#
+# arn
+#    Find the ARN (Amazon Resource Name) for your account by logging in to the
+#    aws console, going to
+#    https://console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials,
+#    and look under "Assigned MFA device".  Instead of hardcoding a value in
+#    this script, you can set a profile-specific value by running
+#    `aws configure set arn MY_ARN --profile AWS_PROFILE`.  If you are using
+#    this script's "config" mode, use the non-MFA profile.
+#
+# onepassword_item
+#    The 1Password login item that contains the virtual MFA device to use for
+#    AWS authentication.  Instead of hardcoding a value in this script, you
+#    can set a profile-specific value by running
+#    `aws configure set onepassword_item "My 1Password Item" --profile AWS_PROFILE`
+#    If you are using this script's "config" mode, use the non-MFA profile.
+#
+# mode
+#    In "config" mode this script will edit your $HOME/.aws/credentials file
+#    to update it with the MFA credentials.  In "environ" mode this script
+#    prints some environment variables that are intended to be sourced in your
+#    shell.
+#
+# aws_profile
+#    If specified, the profile that will be used for getting the MFA session
+#    token.  Otherwise the AWS_PROFILE value from the environment will be used
+#    (with a "-nomfa" suffix added if that is a valid AWS credentials
+#    profile), or `default` if AWS_PROFILE is not set.
+#
+#    The intention is that AWS_PROFILE is set to the profile with MFA enabled
+#    that you want to use, and that your AWS credentials file has a profile
+#    named "$AWS_PROFILE-nomfa" with credentials that can be used to get the
+#    MFA token.  If you then run this script in config mode, it will add or
+#    update the "$AWS_PROFILE" entry in your AWS credentials file so that you
+#    can do AWS operations without having to set any other environment
+#    variables.
+#
+# aws_profile_mfa
+#    The profile that will be used for setting the MFA session token in config
+#    mode.  If not specified and aws_profile ends with `-nomfa` then the
+#    aws_profile without the `-nomfa` suffix will be used, otherwise the
+#    aws_profile with `-mfa` appended will be used.
 
-# read -r -d '' O <<'EOF'
-# {
-#     "Credentials": {
-#         "AccessKeyId": "access_key_id",
-#         "SecretAccessKey": "secret_access_key",
-#         "SessionToken": "session_token",
-#         "Expiration": "2020-08-16T04:29:13+00:00"
-#     }
-# }
-# EOF
+# Need to unset these so that "aws sts" command will use credentials from
+# ~/.aws/credentials file.
+unset AWS_ACCESS_KEY_ID
+unset AWS_SECRET_ACCESS_KEY
+unset AWS_SESSION_TOKEN
 
-totp=$(op get totp "$op_item")
+if test "$mode" = environ; then
+    echo "# In environ mode this command is meant to be used with your shell's eval function."
+    echo "# Run 'eval \$(awslogin)' to set the AWS credential environment variables in your shell."
+fi
+
+# Assign default values to aws_profile and aws_profile_mfa if they are not set.
+if test -z "$aws_profile" -a -n "$AWS_PROFILE" -a -f "$HOME/.aws/credentials"; then
+    if grep "^\\[$AWS_PROFILE-nomfa\\]" "$HOME/.aws/credentials" >/dev/null 2>&1; then
+        test "$debug" = 1 && echo "matched -nomfa" 1>&2
+        aws_profile="$AWS_PROFILE-nomfa"
+    elif grep "^\\[$AWS_PROFILE-mfa\\]" "$HOME/.aws/credentials" >/dev/null 2>&1; then
+        test "$debug" = 1 && echo "matched -mfa" 1>&2
+        aws_profile="$AWS_PROFILE"
+    else
+        aws_profile=default
+    fi
+fi
+if test -z "${aws_profile_mfa}"; then
+    case ${aws_profile} in
+        *-nomfa) aws_profile_mfa=${aws_profile%-nomfa} ;;
+        *)       aws_profile_mfa=${aws_profile}-mfa ;;
+    esac
+fi
+test "$debug" = 1 && echo "aws_profile=$aws_profile aws_profile_mfa=$aws_profile_mfa" 1>&2
+
+if test -z "$arn"; then
+    arn="$(aws configure get arn --profile $aws_profile)" || { echo "arn is not set in $aws_profile" 1>&2; exit 1; }
+fi
+if test -z "$onepassword_item"; then
+    onepassword_item="$(aws configure get onepassword_item --profile $aws_profile)" || { echo "onepassword_item is not set in $aws_profile" 1>&2; exit 1; }
+fi
+
+# Get the time-based one-time password.
+totp=$(op get totp "$onepassword_item")
 test $? -eq 0 || exit 1
-test "$debug" = 1 && echo "# totp=$totp" 1>&2
+test "$debug" = 1 && echo "totp=$totp" 1>&2
 
-aws sts get-session-token --serial-number "$arn" --token-code "$totp" | \
-  jq -r '.Credentials | @sh "export AWS_ACCESS_KEY_ID=\(.AccessKeyId)\nexport AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey)\nexport AWS_SESSION_TOKEN=\(.SessionToken)"'
+aws sts get-session-token --serial-number "$arn" --token-code "$totp" --profile $aws_profile | \
+jq -r '.Credentials | "aws_access_key_id \(.AccessKeyId)\naws_secret_access_key \(.SecretAccessKey)\naws_session_token \(.SessionToken)"' | \
+while read awskey awsval; do
+    test "$debug" = 1 && echo "$awskey: $awsval" 1>&2
+    case "$mode" in
+        environ)
+            echo "$awskey='$awsval'"
+            ;;
+        config)
+            aws configure set "$awskey" "$awsval" --profile $aws_profile_mfa
+            ;;
+    esac
+done

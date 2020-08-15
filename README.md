@@ -12,3 +12,7 @@ aws client (so you can access AWS resources locally, for example) you need to
 specify a second factor.  If your second factor is 1Password's
 TOTP (time-based one-time passwords), this script will make authenticating
 (a little) easier.
+
+The script has two modes, one in which it outputs a list of environment
+variables for you to `eval` in your shell, and one it which it edits your AWS
+credentials file for you.  See the script file itself for documentation.
