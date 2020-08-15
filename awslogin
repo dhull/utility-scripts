@@ -1,0 +1,46 @@
+#! /bin/bash
+
+echo "# This command is meant to be used with your shell's eval function."
+echo "# Run 'eval \$(awslogin)' to set the AWS credential environment variables in your shell."
+
+debug=1
+arn=MY_ARN
+op_item="My 1Password Item"
+
+# This script outputs some "export" commands that are meant to be evaled in
+# your shell.  You must already be authenticated with the 1Password op
+# command; if not, the command will exit with an error.
+#
+# To use this script you need to install awscli, jq, and 1password-cli.  The
+# 1password-cli cask installs op, the 1Password command-line client.
+#
+#     brew install awscli jq
+#     brew cask install 1password-cli
+#
+# Instructions on logging in to the 1Password client for the first time are at:
+# https://support.1password.com/command-line-getting-started/
+
+# Documentation for using the AWS client with MFA is at:
+# https://aws.amazon.com/premiumsupport/knowledge-center/authenticate-mfa-cli/
+
+# Find your ARN by logging in to the aws console, going to
+# https://console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials,
+# and look under "Assigned MFA device".
+
+# read -r -d '' O <<'EOF'
+# {
+#     "Credentials": {
+#         "AccessKeyId": "access_key_id",
+#         "SecretAccessKey": "secret_access_key",
+#         "SessionToken": "session_token",
+#         "Expiration": "2020-08-16T04:29:13+00:00"
+#     }
+# }
+# EOF
+
+totp=$(op get totp "$op_item")
+test $? -eq 0 || exit 1
+test "$debug" = 1 && echo "# totp=$totp" 1>&2
+
+aws sts get-session-token --serial-number "$arn" --token-code "$totp" | \
+  jq -r '.Credentials | @sh "export AWS_ACCESS_KEY_ID=\(.AccessKeyId)\nexport AWS_SECRET_ACCESS_KEY=\(.SecretAccessKey)\nexport AWS_SESSION_TOKEN=\(.SessionToken)"'
