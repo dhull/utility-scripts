@@ -113,13 +113,14 @@ totp=$(op get totp "$onepassword_item")
 test $? -eq 0 || exit 1
 test "$debug" = 1 && echo "totp=$totp" 1>&2
 
+# Fetch the AWS session token.
 aws sts get-session-token --serial-number "$arn" --token-code "$totp" --profile $aws_profile | \
 jq -r '.Credentials | "aws_access_key_id \(.AccessKeyId)\naws_secret_access_key \(.SecretAccessKey)\naws_session_token \(.SessionToken)"' | \
 while read awskey awsval; do
     test "$debug" = 1 && echo "$awskey: $awsval" 1>&2
     case "$mode" in
         environ)
-            echo "$awskey='$awsval'"
+            echo "export $awskey='$awsval'"
             ;;
         config)
             aws configure set "$awskey" "$awsval" --profile $aws_profile_mfa
