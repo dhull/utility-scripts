@@ -1,0 +1,117 @@
+#! /usr/bin/perl
+
+use strict;
+use warnings;
+
+use Data::Dump;
+use IO::Stty;
+use JSON::PP qw( decode_json );
+use List::MoreUtils qw( natatime );
+use MIME::Base64 qw( decode_base64url );
+use URI;
+use URI::Escape qw( uri_unescape );
+
+# parseurl('https://www.huntakiller.com/subscribe-refer?utm_campaign=Chargebee%20Launch%20Campaign&utm_source=friendbuy&utm_content=email&utm_medium=referral&fbuy=eyJhbGciOiJSUzI1NiJ9.MjI3NTQ4ZGEtYmMzNi00NjNkLTk0OTQtZjQwZWFhZmYyMzY5Ojo3NmM4ZTEwNi0zMjE1LTQ2NDYtYTQ1OC1lMTM5OTI4YjYyZjc6YjhmMTkwYTYtMmVhYi00NDIzLTkyOTgtNGY5Nzk1OTM0YmU5Ond3dy5odW50YWtpbGxlci5jb206MTYwMDg3NDg0NA.Xu94_gCAfdNVJzNBwJtSBLXg6Cbz13zbN5TKyTm_2yAIQfw8YwC3VjbIF89xVgaWQhkK8YI4tiCvR5TMo5mUT0gzF5yYpx_t5dnAJw51Hn5F0of8L8m2b0iqY74t5IiDb0ZPw1uwzfbgCn5VFs7sZHEViv9L1AW3mNj6xnoXOWo&fbshare=JTdCJTIybmFtZSUyMiUzQSUyMkRhdmlkJTIwSHVsbCUyMiUyQyUyMnNlbmRSZW1pbmRlciUyMiUzQSUyMm5vJTIyJTJDJTIyY2hhbm5lbCUyMiUzQSUyMmVtYWlsJTIyJTJDJTIyc2Vzc2lvbklkJTIyJTNBJTIyMjAyMC0wOS0xNVQyMiUzQTAxJTNBMjEuNzgyWiU3Qzk2ODY3OTYwMTM3NDYxJTIyJTJDJTIybWVyY2hhbnRJZCUyMiUzQSUyMjIyNzU0OGRhLWJjMzYtNDYzZC05NDk0LWY0MGVhYWZmMjM2OSUyMiUyQyUyMnV0bSUyMiUzQSUyMiU3QiU3RCUyMiU3RA%3D%3D');
+
+# parseurl('https://public.fbot.me/track/?merchantId=227548da-bc36-463d-9494-f40eaaff2369&metadata=eyJ0aXRsZSI6IkNob29zZSBZb3VyIFBsYW4gLSBIdW50IEEgS2lsbGVyIiwidXJsIjoiaHR0cHM6Ly93d3cuaHVudGFraWxsZXIuY29tL3N1YnNjcmliZS1yZWZlcj91dG1fY2FtcGFpZ249Q2hhcmdlYmVlJTIwTGF1bmNoJTIwQ2FtcGFpZ24mdXRtX3NvdXJjZT1mcmllbmRidXkmdXRtX2NvbnRlbnQ9ZW1haWwmdXRtX21lZGl1bT1yZWZlcnJhbCZmYnV5PWV5SmhiR2NpT2lKU1V6STFOaUo5Lk1qSTNOVFE0WkdFdFltTXpOaTAwTmpOa0xUazBPVFF0WmpRd1pXRmhabVl5TXpZNU9qbzNObU00WlRFd05pMHpNakUxTFRRMk5EWXRZVFExT0MxbE1UTTVPVEk0WWpZeVpqYzZZamhtTVRrd1lUWXRNbVZoWWkwME5ESXpMVGt5T1RndE5HWTVOemsxT1RNMFltVTVPbmQzZHk1b2RXNTBZV3RwYkd4bGNpNWpiMjA2TVRZd01EZzNORGcwTkEuWHU5NF9nQ0FmZE5WSnpOQndKdFNCTFhnNkNiejEzemJONVRLeVRtXzJ5QUlRZnc4WXdDM1ZqYklGODl4VmdhV1Foa0s4WUk0dGlDdlI1VE1vNW1VVDBnekY1eVlweF90NWRuQUp3NTFIbjVGMG9mOEw4bTJiMGlxWTc0dDVJaURiMFpQdzF1d3pmYmdDbjVWRnM3c1pIRVZpdjlMMUFXM21OajZ4bm9YT1dvJmZic2hhcmU9SlRkQ0pUSXlibUZ0WlNVeU1pVXpRU1V5TWtSaGRtbGtKVEl3U0hWc2JDVXlNaVV5UXlVeU1uTmxibVJTWlcxcGJtUmxjaVV5TWlVelFTVXlNbTV2SlRJeUpUSkRKVEl5WTJoaGJtNWxiQ1V5TWlVelFTVXlNbVZ0WVdsc0pUSXlKVEpESlRJeWMyVnpjMmx2Ymtsa0pUSXlKVE5CSlRJeU1qQXlNQzB3T1MweE5WUXlNaVV6UVRBeEpUTkJNakV1TnpneVdpVTNRemsyT0RZM09UWXdNVE0zTkRZeEpUSXlKVEpESlRJeWJXVnlZMmhoYm5SSlpDVXlNaVV6UVNVeU1qSXlOelUwT0dSaExXSmpNell0TkRZelpDMDVORGswTFdZME1HVmhZV1ptTWpNMk9TVXlNaVV5UXlVeU1uVjBiU1V5TWlVelFTVXlNaVUzUWlVM1JDVXlNaVUzUkElM0QlM0QiLCJvcmlnaW4iOiJodHRwczovL3d3dy5odW50YWtpbGxlci5jb20iLCJwYXRobmFtZSI6Ii9zdWJzY3JpYmUtcmVmZXIiLCJ3aWRnZXREaXNwbGF5TmFtZSI6IkZyaWVuZCBIb21lcGFnZSBPdmVybGF5In0%3D&payload=JTdCJTIybWVyY2hhbnRJZCUyMiUzQSUyMjIyNzU0OGRhLWJjMzYtNDYzZC05NDk0LWY0MGVhYWZmMjM2OSUyMiUyQyUyMndpZGdldElkJTIyJTNBJTIyMDc1NzM3ZTYtODBjMS00OWI4LWE1NDItZDQxNjkzMmYxMDVhJTIyJTJDJTIybWVhc3VyZXMlMjIlM0ElN0IlMjJ3aWRnZXRUb3AlMjIlM0EyNDIuNSUyQyUyMndpZGdldExlZnQlMjIlM0EyNTIlMkMlMjJ3aWRnZXRIZWlnaHQlMjIlM0E1MDAlMkMlMjJ3aWRnZXRXaWR0aCUyMiUzQTEwMDAlMkMlMjJzY3JlZW5XaWR0aCUyMiUzQTE1MDQlMkMlMjJzY3JlZW5IZWlnaHQlMjIlM0E5ODUlMkMlMjJ2aXNpYmxlUmF0aW8lMjIlM0ExMDAlMkMlMjJ2aXNpYmxlSGVpZ2h0JTIyJTNBNTAwJTJDJTIydmlzaWJsZVdpZHRoJTIyJTNBMTAwMCUyQyUyMmRlbGF5JTIyJTNBMSU3RCU3RA%3D%3D&type=widget_display&tracker=eyJhbGciOiJSUzI1NiJ9.MjI3NTQ4ZGEtYmMzNi00NjNkLTk0OTQtZjQwZWFhZmYyMzY5OjUwYjhmM2FjLTViYzktNGU1Ni1iZmYzLTI4MWQ0NWE1YTIzNjphODUzNzQ2My04ZTMxLTRmNmMtYTVmZC1hYjYyNzk3YzkyYTk6Ond3dy5odW50YWtpbGxlci5jb206MTYwMDg4MDEzNzo6.ehR5HPPiHwPqSboPISZCZhhz4GwMQOOUssFtCg8Ep6WzZ2vT61rVNa8pJsxXp_oZEJ353WhcnxKkVaIFyi3nQtOU94oUV4tJExNDNG7Fy7JGo4xhATkwWLHRIRRvVS3Ki5NRDfrz1gIox8g4Ggkeg66PH2tmC20OJvuCzNBUUds');
+# exit(0);
+
+# Disable canonical input processing because it has a per-line 1024 character
+# maximum and prevents the entering of long URLs when enabled.
+# https://unix.stackexchange.com/questions/204815/terminal-does-not-accept-pasted-or-typed-lines-of-more-than-1024-characters
+my $old_stty = IO::Stty::stty(\*STDIN, '-g');
+sub restore_tty { IO::Stty::stty(\*STDIN, $old_stty); }
+$SIG{INT} = $SIG{QUIT} = \&restore_tty;
+
+IO::Stty::stty(\*STDIN, '-icanon');
+
+while (my $url = <STDIN>) {
+  chomp($url);
+  parseurl($url);
+  print "\n";
+}
+
+restore_tty();
+
+exit(0);
+
+########################################################################
+
+sub parseurl {
+  print ">$_[0]<\n";
+  my $u = URI->new($_[0]);
+  # print Data::Dump::dump($u), "\n";
+  # print Data::Dump::dump($u->query_form()), "\n";
+  my $qp = natatime(2, $u->query_form());
+  while (my ($k, $v) = $qp->()) {
+    # my $v = $qp[$i+1];
+    $v = decode_value($v);
+    print "  $k $v\n";
+  }
+}
+
+my $uuid;
+my $b64_char;
+my $is_jwt_re;
+
+BEGIN {
+  my $hex = '[A-Fa-f0-9]';
+  #  UUID 227548da-bc36-463d-9494-f40eaaff2369
+  $uuid = qr/${hex}{8}-${hex}{4}-${hex}{4}-${hex}{4}-${hex}{12}/;
+  $b64_char = '[0-9A-Za-z\-_]';
+  $is_jwt_re = qr/^${b64_char}+\.${b64_char}+\.${b64_char}+$/;
+}
+
+sub is_uuid {
+  return $_[0] =~ m/^$uuid$/;
+}
+
+sub is_base64 {
+  my ($s) = @_;
+
+  # This matches the URL-safe base64 variant.
+  if ($s !~ m/^${b64_char}*={0,2}$/) { return 0; }
+
+  my $ucount = 0;
+  my $lcount = 0;
+  my $dcount = 0;
+  foreach my $c (split('', $s)) {
+    if    ($c ge 'A' && $c le 'Z') { $ucount++; }
+    elsif ($c ge 'a' && $c le 'z') { $lcount++; }
+    elsif ($c ge '0' && $c le '9') { $dcount++; }
+  }
+  my $l = length($s);
+  return $ucount >= $l / 4 and $lcount >= $l / 4 and $dcount >= $l / 10;
+}
+
+sub is_jwt {
+  return $_[0] =~ m/$is_jwt_re/;
+}
+
+sub decode_jwt {
+  my ($header, $payload, $sig) = split(m/\./, $_[0]);
+  return join(' ', decode_base64url($header), decode_base64url($payload), $sig);
+}
+
+sub is_json {
+  return $_[0] =~ m/^\{.*\}$/;
+}
+
+sub is_query {
+  # https://en.wikipedia.org/wiki/Percent-encoding
+  return $_[0] =~ m/%[0-9A-Fa-f]{2}/ # has at least one URI-escape.
+    and $_[0] =~ m/^(?:%[0-9A-Fa-f]{2}|[^%])*$/;
+}
+
+sub decode_value {
+  my ($s) = @_;
+  # Check to see if value looks like a UUID first, because a UUID also looks like base64.
+  if ($s eq '')         { return $s; }
+  if (is_uuid($s))      { return $s; }
+  if (is_base64($s))    { return 'BASE64 ' . decode_value(decode_base64url($s)); }
+  if (is_jwt($s))       { return 'JWT ' . decode_jwt($s); }
+  if (is_json($s))      { return 'JSON ' . Data::Dump::dump(decode_json($s)); }
+  if (is_query($s))     { return 'QUERY ' . decode_value(uri_unescape($s)); }
+  return $s;
+}
+
