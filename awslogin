@@ -5,6 +5,7 @@ mode=config			# one of "environ" or "config"
 #aws_profile=default		# default from $AWS_PROFILE
 #arn=ARN			# default from "aws configure get arn --profile $aws_profile"
 #onepassword_item="1P Item"	# default from "aws configure get onepassword_item --profile $aws_profile"
+duration=86400                  # duration of session token in seconds
 debug=0
 
 # This script helps integrate 1Password TOTPs (time-based one-time passwords)
@@ -48,7 +49,8 @@ debug=0
 #    In "config" mode this script will edit your $HOME/.aws/credentials file
 #    to update it with the MFA credentials.  In "environ" mode this script
 #    prints some environment variables that are intended to be sourced in your
-#    shell.
+#    shell.  Config mode is convenient because it allows you to run aws
+#    commands from any shell.
 #
 # aws_profile
 #    If specified, the profile that will be used for getting the MFA session
@@ -69,6 +71,10 @@ debug=0
 #    mode.  If not specified and aws_profile ends with `-nomfa` then the
 #    aws_profile without the `-nomfa` suffix will be used, otherwise the
 #    aws_profile with `-mfa` appended will be used.
+#
+# duration
+#    The number of seconds the session token will be valid.
+
 
 # Need to unset these so that "aws sts" command will use credentials from
 # ~/.aws/credentials file.
@@ -79,6 +85,10 @@ unset AWS_SESSION_TOKEN
 if test "$mode" = environ; then
     echo "# In environ mode this command is meant to be used with your shell's eval function."
     echo "# Run 'eval \$(awslogin)' to set the AWS credential environment variables in your shell."
+fi
+
+if test -z "$aws_profile" -a -z "$AWS_PROFILE"; then
+    echo "AWS_PROFILE is not set" 1>&2; exit 1
 fi
 
 # Assign default values to aws_profile and aws_profile_mfa if they are not set.
@@ -111,10 +121,11 @@ fi
 # Get the time-based one-time password.
 totp=$(op get totp "$onepassword_item")
 test $? -eq 0 || exit 1
-test "$debug" = 1 && echo "totp=$totp" 1>&2
 
 # Fetch the AWS session token.
-aws sts get-session-token --serial-number "$arn" --token-code "$totp" --profile $aws_profile | \
+cmd=(aws sts get-session-token --duration-seconds "$duration" --serial-number "$arn" --token-code "$totp" --profile "$aws_profile")
+test "$debug" = 1 && echo "${cmd[@]}" 1>&2
+"${cmd[@]}" | \
 jq -r '.Credentials | "aws_access_key_id \(.AccessKeyId)\naws_secret_access_key \(.SecretAccessKey)\naws_session_token \(.SessionToken)"' | \
 while read awskey awsval; do
     test "$debug" = 1 && echo "$awskey: $awsval" 1>&2
