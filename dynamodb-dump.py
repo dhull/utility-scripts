@@ -1,4 +1,3 @@
-#!/usr/local/Cellar/awscli/2.1.18/libexec/bin/python3
 #! /usr/bin/env python3
 
 default_profile = 'fbot-sandbox'
@@ -17,6 +16,7 @@ import sys
 pp = pprint.PrettyPrinter(indent=4, compact=True)
 
 # Use awscli's virtualenv if we're not already running in one.
+# This works until awscli-2.1.18, when the activate_this.py module was removed/moved.
 if 'VIRTUAL_ENV' not in os.environ:
     print('using awscli virtualenv', file=sys.stderr)
     # aws and activate_this.py's paths are something like:
@@ -51,7 +51,12 @@ import botocore.session
 import botocore.exceptions
 
 # https://stackoverflow.com/questions/36558646/how-to-convert-from-dynamodb-wire-protocol-to-native-python-object-manually-with
-from awscli.customizations.dynamodb.types import TypeDeserializer
+try:
+    from boto3.dynamodb.types import TypeDeserializer
+except ImportError as e:
+    # Location in awscli v2
+    from awscli.customizations.dynamodb.types import TypeDeserializer
+
 
 def dump_table(table, profile, **opts):
     limit = opts.get('limit')
@@ -107,6 +112,7 @@ def dump_table(table, profile, **opts):
 
 ########################################################################
 
+# https://stackoverflow.com/questions/1960516/python-json-serialize-a-decimal-object
 # Allow JSON encoding of Decimal objects (which are returned by
 # TypeDeserializer).
 
