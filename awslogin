@@ -5,7 +5,7 @@ mode=config			# one of "environ" or "config"
 #aws_profile=default		# default from $AWS_PROFILE
 #arn=ARN			# default from "aws configure get arn --profile $aws_profile"
 #onepassword_item="1P Item"	# default from "aws configure get onepassword_item --profile $aws_profile"
-duration=86400                  # duration of session token in seconds
+duration=$((36*3600))           # duration of session token in seconds (max is 36 hours = 129600 seconds)
 debug=0
 
 # This script helps integrate 1Password TOTPs (time-based one-time passwords)
