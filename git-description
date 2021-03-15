@@ -20,10 +20,16 @@ use constant {
 };
 
 my $state = BEFORE_COMMIT;
+commit:
 while (my $l = <$fh>) {
-  chomp($l);
-
   if ($l =~ m/^\S/) {
+    if ($state != BEFORE_COMMIT) {
+      if ($state == IN_PARAGRAPH) {
+        print "\n";
+      }
+      $state = BEFORE_COMMIT;
+    }
+
     # Exit when we find a branch point, something like
     #   commit f2510f2aba9829e0e88957866cb49541115583dc (origin/master, origin/HEAD, master)
     # except if we've already pushed the branch it will be like
@@ -38,7 +44,6 @@ while (my $l = <$fh>) {
         }
       }
     }
-    $state = BEFORE_COMMIT;
     next;
   }
 
@@ -49,35 +54,36 @@ while (my $l = <$fh>) {
     if ($state == BEFORE_COMMIT) {
       # We've found the start of a new commit message.  Everything else will
       # be indented four spaces so that it be indented under this bullet.
-      $l = "* $l";
+      $l = "\n* $l";
       $state = BEFORE_PARAGRAPH;
     } elsif ($l eq '') {
       # We've found a blank line; start a new paragraph.
-      $l = "\n\n";
+      $l = $state eq IN_PARAGRAPH ? "\n\n" : "\n";
       $state = BEFORE_PARAGRAPH;
     } elsif ($l =~ m/^\>/) {
       # We've found some quoted text.
-      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l\n";
+      # Don't include it in an unwrapped paragraph.
+      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l";
       $state = BEFORE_PARAGRAPH;
     } elsif ($l =~ m/^\s/) {
-      # We've found some indented text (code).
-      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l\n";
+      # We've found some indented text (i.e., code).
+      # Don't include it in an unwrapped paragraph.
+      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l";
       $state = BEFORE_PARAGRAPH;
-    } elsif ($l =~ m/^[\*\-]\s+/) {
-      # We've found some bulleted text.
-      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l\n";
-      $state = BEFORE_PARAGRAPH;
+    } elsif ($l =~ m/^(?:[\*\-]|\d+\.)\s+/) {
+      # We've found a list.
+      # Don't include it in an unwrapped paragraph.
+      chomp($l);
+      $l = ($state == IN_PARAGRAPH ? "\n" : '') . "    $l";
+      $state = IN_PARAGRAPH;
     } else {
       # Otherwise join lines to unwrap paragraph unless the line begins with
       # whitespace.
+      chomp($l);
       $l = ($state == IN_PARAGRAPH ? ' ' : '    ') . $l;
       $state = IN_PARAGRAPH;
     }
     print $l;
-  } else {
-    if ($state != BEFORE_COMMIT) {
-      print "\n\n";
-    }
   }
 }
 
