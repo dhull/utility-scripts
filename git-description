@@ -29,10 +29,13 @@ while (my $l = <$fh>) {
     # except if we've already pushed the branch it will be like
     #   commit 6ed5150033d9f1aedbc416a6f8726b48e71b7dc3 (origin/$branch)
     # and we want to ignore that.
-    if ($l =~ m,^commit\s+.*\borigin/([^\s\,]+),) {
+    if ($l =~ m,^commit\s+\S+\s+\(([^\)]+)\),) {
       print STDERR "checking $1\n";
-      if (! defined $branch or $1 ne $branch) {
-	last;
+      my @branch = split(m/,\s*/, $1);
+      foreach my $b (@branch) {
+        if ($b eq "master" or ($b =~ m,^origin/, && $b ne "origin/$branch")) {
+          last commit;
+        }
       }
     }
     $state = BEFORE_COMMIT;
