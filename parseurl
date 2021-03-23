@@ -6,7 +6,7 @@ use warnings;
 use Data::Dump;
 use IO::Stty;
 use JSON::PP qw( decode_json encode_json );
-use List::MoreUtils qw( natatime );
+use List::MoreUtils qw( natatime zip );
 use MIME::Base64 qw( decode_base64url );
 use URI;
 use URI::Escape qw( uri_unescape );
@@ -39,7 +39,7 @@ exit(0);
 
 my $json;
 BEGIN {
-  $json = JSON::PP->new->pretty->canonical->indent_length(2);
+  $json = JSON::PP->new->pretty->canonical->indent_length(4);
 }
 
 sub parseurl {
@@ -98,8 +98,10 @@ sub decode_jwt {
   # fbuy payload is built by encryptProfile function.
   # ${merchantId}::${globalId}:${attributionId}:${domain}:${epoch}
   my $payload_decoded = decode_base64url($payload);
-  if ($payload_decoded =~ m/^($uuid_re)::($uuid_re):($uuid_re):([^:]*):(\d+)$/) {
-    $payload_decoded = { merchantId => $1, globalId => $2, attributionId => $3, domain => $4, epoch => $5 };
+  if ($payload_decoded =~ m/^($uuid_re):/) {
+    my @k = qw( merchantId profileId globalId attributionId domain epoch customerId email variantId );
+    my @v = split(m/:/, $payload_decoded);
+    $payload_decoded = { zip(@k, @v) };
   }
   return { header => decode_json(decode_base64url($header)), payload => $payload_decoded, sig => $sig };
 }
@@ -109,8 +111,9 @@ sub is_json {
 }
 
 sub format_json {
-  # Pretty-prints the JSON and indents it by 2 spaces.
-  (my $json = $json->encode($_[0])) =~ s/\n(?=.)/\n  /g;
+  my $json = $json->encode($_[0]);
+  chomp($json);                 # Remove the last newline.
+  $json =~ s/\n(?=.)/\n  /g;    # Indent by 2 spaces.
   return $json;
 }
 
