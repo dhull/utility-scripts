@@ -3,14 +3,16 @@
 use strict;
 use warnings;
 
+my $branch = $ARGV[0];
 
-open(my $fh, '-|', 'git', 'log', '--decorate=short') or die;
+open(my $fh, '-|', 'git', 'log', '--decorate=short', $branch || ()) or die;
 
 # The first line should contain the branch name
 #   commit <HASH> (HEAD -> <BRANCH>
-my $branch;
 my $l = <$fh>;
-if ($l =~ m/^commit\s+\S+\s+\(HEAD\s+\-\>\s+([^\s\,]+)/) { $branch = $1; }
+if (! $branch) {
+  if ($l =~ m/^commit\s+\S+\s+\(HEAD\s+\-\>\s+([^\s\,\)]+)/) { $branch = $1; }
+}
 print STDERR "branch: $branch\n";
 
 use constant {
