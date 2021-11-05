@@ -44,12 +44,23 @@ BEGIN {
 }
 
 sub parseurl {
+  if ($_[0] =~ m/^\s*$/) { return; } # Ignore empty lines.
+
   print ">$_[0]<\n";
-  my $u = URI->new($_[0]);
-  # print Data::Dump::dump($u), "\n";
-  # print Data::Dump::dump($u->query_form()), "\n";
-  my $qp = natatime(2, $u->query_form());
-  while (my ($k, $v) = $qp->()) {
+
+  # Parse the query params. If the input doesn't look like like a URL
+  # (starting with a scheme and a colon) treat it as a JWT tracker.
+  my @qp = ($_[0] =~ m,^[a-z]*:/,)
+    ? do {
+      my $u = URI->new($_[0]);
+      # print Data::Dump::dump($u), "\n";
+      # print Data::Dump::dump($u->query_form()), "\n";
+      $u->query_form();
+    }
+    : ("tracker", $_[0]);
+
+  # Loop through the query parameters and output each one.
+  while (my ($k, $v) = splice(@qp, 0, 2)) {
     # my $v = $qp[$i+1];
     $v = decode_value($v);
     print "  $k $v\n";
