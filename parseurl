@@ -86,7 +86,21 @@ sub is_base64 {
     elsif ($c ge '0' && $c le '9') { $dcount++; }
   }
   my $l = length($s);
-  return $ucount >= $l / 4 and $lcount >= $l / 4 and $dcount >= $l / 10;
+  # Expect over 25% lowercase, 25% uppercase, and 2% digits.
+#  printf("%s lc:%.4f uc:%.4f d:%.4f\n", $s, $ucount / $l, $lcount / $l, $dcount / $l);
+  my $is_base64 = ($ucount >= $l / 4) && ($lcount >= $l / 4) && ($dcount >= $l / 50);
+  if ($is_base64) {
+    my $s_decoded = decode_base64url($s);
+    # If the decoded base64 string contains control characters (other than CR
+    # and NL), don't decode it.
+    my $has_control = ($s_decoded =~ m/[\x{0}-\x{9}\x{b}\x{c}\x{e}-\x{1f}\x{7f}]/);
+    # print "has_control: $s_decoded >$has_control<\n";
+    if ($has_control) {
+      $is_base64 = 0;
+    }
+  }
+
+  return $is_base64;
 }
 
 sub is_jwt {
