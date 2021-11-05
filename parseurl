@@ -134,7 +134,7 @@ sub format_json {
 sub is_query {
   # https://en.wikipedia.org/wiki/Percent-encoding
   return $_[0] =~ m/%[0-9A-Fa-f]{2}/ # has at least one URI-escape.
-    and $_[0] =~ m/^(?:%[0-9A-Fa-f]{2}|[^%])*$/;
+    && $_[0] =~ m/^(?:%[0-9A-Fa-f]{2}|[^%])*$/;
 }
 
 sub decode_value {
