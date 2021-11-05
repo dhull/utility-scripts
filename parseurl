@@ -4,6 +4,7 @@ use strict;
 use warnings;
 
 use Data::Dump;
+use Date::Format qw( time2str );
 use IO::Stty;
 use JSON::PP qw( decode_json encode_json );
 use List::MoreUtils qw( natatime zip );
@@ -116,6 +117,9 @@ sub decode_jwt {
     my @k = qw( merchantId profileId globalId attributionId domain epoch customerId email variantId );
     my @v = split(m/:/, $payload_decoded);
     $payload_decoded = { zip(@k, @v) };
+    if (defined $payload_decoded->{epoch}) {
+      $payload_decoded->{epoch_readable} = time2str("%Y-%m-%d %H:%M:%S %Z", $payload_decoded->{epoch});
+    }
   }
   return { header => decode_json(decode_base64url($header)), payload => $payload_decoded, sig => $sig };
 }
