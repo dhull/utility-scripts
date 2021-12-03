@@ -48,16 +48,22 @@ sub parseurl {
 
   print ">$_[0]<\n";
 
-  # Parse the query params. If the input doesn't look like like a URL
-  # (starting with a scheme and a colon) treat it as a JWT tracker.
-  my @qp = ($_[0] =~ m,^[a-z]*:/,)
-    ? do {
-      my $u = URI->new($_[0]);
-      # print Data::Dump::dump($u), "\n";
-      # print Data::Dump::dump($u->query_form()), "\n";
-      $u->query_form();
-    }
-    : ("tracker", $_[0]);
+  # We accept inputs in three formats.  The first is a URL for a GET request,
+  # the second is a JSON-format body of a POST request, and the third is a
+  # bare JWT tracker.
+  my @qp;
+  if ($_[0] =~ m,^[a-z]*:/,) {
+    # Parse a URL's query parameters.
+    my $u = URI->new($_[0]);
+    # print Data::Dump::dump($u), "\n";
+    # print Data::Dump::dump($u->query_form()), "\n";
+    @qp = $u->query_form();
+  } elsif ($_[0] =~ m/^\{/) {
+    # Decode JSON and convert top-level hash into list of key/value items.
+    @qp = %{$json->decode($_[0])};
+  } else {
+    @qp = ("tracker", $_[0]);
+  }
 
   # Loop through the query parameters and output each one.
   while (my ($k, $v) = splice(@qp, 0, 2)) {
