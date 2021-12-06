@@ -60,7 +60,8 @@ sub parseurl {
     @qp = $u->query_form();
   } elsif ($_[0] =~ m/^\{/) {
     # Decode JSON and convert top-level hash into list of key/value items.
-    @qp = %{$json->decode($_[0])};
+    my $qp = $json->decode($_[0]);
+    @qp = map {($_, $qp->{$_})} sort keys %$qp;
   } else {
     @qp = ("tracker", $_[0]);
   }
