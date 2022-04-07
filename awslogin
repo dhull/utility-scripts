@@ -119,7 +119,12 @@ if test -z "$onepassword_item"; then
 fi
 
 # Get the time-based one-time password.
-totp=$(op get totp "$onepassword_item")
+case $(op --version) in
+    1.*)
+        totp=$(op get totp "$onepassword_item") ;;
+    *)
+        totp=$(op item get --otp "$onepassword_item") ;;
+esac
 test $? -eq 0 || exit 1
 
 # Fetch the AWS session token.
