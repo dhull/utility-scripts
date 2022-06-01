@@ -60,7 +60,8 @@ sub parseurl {
     @qp = $u->query_form();
   } elsif ($_[0] =~ m/^\{/) {
     # Decode JSON and convert top-level hash into list of key/value items.
-    my $qp = $json->decode($_[0]);
+    my $qp = eval { $json->decode($_[0]) };
+    if ($@) { warn "BAD JSON: $@\n"; return; }
     @qp = map {($_, $qp->{$_})} sort keys %$qp;
   } else {
     @qp = ("tracker", $_[0]);
@@ -161,6 +162,9 @@ sub is_query {
 
 sub decode_value {
   my ($s) = @_;
+  if (! defined $s)     { return 'undefined'; }
+  if (ref($s) eq 'HASH') { return format_json($s) }
+  # if (ref($s) eq 'HASH') { return join('', map { sprintf('%s %s', $_, decode_value($s->{$_})) } sort(keys(%$s))) }
   # Check to see if value looks like a UUID first, because a UUID also looks like base64.
   if ($s eq '')         { return $s; }
   if (is_uuid($s))      { return $s; }
