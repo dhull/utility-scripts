@@ -62,7 +62,10 @@ echo "AWS_PROFILE=$AWS_PROFILE"
 echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
 echo "AWS_REGION=$AWS_REGION"
 
-set -x
+function run {
+    echo "$@" 1>&2
+    "$@"
+}
 
 command="$1"
 shift
@@ -86,8 +89,8 @@ case "$command" in
          esac
 
          # terraform init -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
-         rm -rf ".terraform"
-         terraform init \
+         run rm -rf ".terraform"
+         run terraform init \
                    -backend-config="$bucket" \
                    -backend-config="$key" \
                    -backend-config="region=us-east-1" \
@@ -96,11 +99,8 @@ case "$command" in
                    -force-copy \
                    -get=true "$@"
          ;;
-     plan)
-         terraform plan -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
-         ;;
-     apply)
-         terraform apply -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
+     plan|apply|graph)
+         run terraform $command -var 'image_sha=' -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
          ;;
      *)
          echo "unknown command \"$command\"" 1>&2; exit 1
