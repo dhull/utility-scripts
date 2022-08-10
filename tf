@@ -81,9 +81,17 @@ case "$command" in
                   bucket="bucket=fbt-remote-state-$AWS_ACCOUNT_ID"
                   key="key=terraform.fbt-long-job.tfstate"
                   ;;
+              */fbt-proxy/terraform)
+                  bucket="bucket=fbt-remote-state-$AWS_ACCOUNT_ID"
+                  key="key=terraform.fbt-proxy.tfstate"
+                  ;;
               */fbt-event/infrastructure)
                   bucket="bucket=fbot-${fbotenv}-state"
                   key="key=terraform.fbt_event.tfstate"
+                  ;;
+              */fbt-reward/infrastructure)
+                  bucket="bucket=fbot-${fbotenv}-state"
+                  key="key=terraform.fbt_reward.tfstate"
                   ;;
               *)
                   echo "unknown dir; maybe use apex?" 1>&2; exit 1 ;;
