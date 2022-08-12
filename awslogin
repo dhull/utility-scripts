@@ -35,14 +35,14 @@ duration=$((36*3600))           # duration of session token in seconds (max is 3
 #    https://console.aws.amazon.com/iam/home?region=us-east-1#/security_credentials,
 #    and look under "Assigned MFA device".  Instead of hardcoding a value in
 #    this script, you can set a profile-specific value by running
-#    `aws configure set arn MY_ARN --profile AWS_PROFILE`.  If you are using
+#    `aws --profile AWS_PROFILE configure set arn MY_ARN`.  If you are using
 #    this script's "config" mode, use the non-MFA profile.
 #
 # onepassword_item
 #    The 1Password login item that contains the virtual MFA device to use for
 #    AWS authentication.  Instead of hardcoding a value in this script, you
 #    can set a profile-specific value by running
-#    `aws configure set onepassword_item "My 1Password Item" --profile AWS_PROFILE`
+#    `aws --profile AWS_PROFILE configure set onepassword_item "My 1Password Item"`
 #    If you are using this script's "config" mode, use the non-MFA profile.
 #
 # mode
@@ -53,28 +53,20 @@ duration=$((36*3600))           # duration of session token in seconds (max is 3
 #    commands from any shell.
 #
 # aws_profile
-#    If specified, the profile that will be used for getting the MFA session
-#    token.  Otherwise the AWS_PROFILE value from the environment will be used
-#    (with a "-nomfa" suffix added if that is a valid AWS credentials
-#    profile), or `default` if AWS_PROFILE is not set.
+#    The profile to get the MFA session token for.
 #
-#    The intention is that AWS_PROFILE is set to the profile with MFA enabled
-#    that you want to use, and that your AWS credentials file has a profile
-#    named "$AWS_PROFILE-nomfa" with credentials that can be used to get the
-#    MFA token.  If you then run this script in config mode, it will add or
-#    update the "$AWS_PROFILE" entry in your AWS credentials file so that you
-#    can do AWS operations without having to set any other environment
-#    variables.
+#    In "environ" mode, this profile will be used to get the MFA session token
+#    and the `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
+#    `AWS_SESSION_TOKEN` values will be printed to be evaled into your
+#    environment.
 #
-# aws_profile_mfa
-#    The profile that will be used for setting the MFA session token in config
-#    mode.  If not specified and aws_profile ends with `-nomfa` then the
-#    aws_profile without the `-nomfa` suffix will be used, otherwise the
-#    aws_profile with `-mfa` appended will be used.
+#    In "config" mode, the "${aws_profile}-nomfa" profile (which you must
+#    create before running the script) will be used to get the MFA session
+#    token, and the $aws_profile section in your AWS credentials file will be
+#    updated with the MFA credentials.
 #
 # duration
 #    The number of seconds the session token will be valid.
-
 
 # Need to unset these so that "aws sts" command will use credentials from
 # ~/.aws/credentials file.
@@ -87,29 +79,41 @@ if test "$mode" = environ; then
     echo "# Run 'eval \$(awslogin)' to set the AWS credential environment variables in your shell."
 fi
 
-if test -z "$aws_profile" -a -z "$AWS_PROFILE"; then
-    echo "AWS_PROFILE is not set" 1>&2; exit 1
-fi
-
-# Assign default values to aws_profile and aws_profile_mfa if they are not set.
-if test -z "$aws_profile" -a -n "$AWS_PROFILE" -a -f "$HOME/.aws/credentials"; then
-    if grep "^\\[$AWS_PROFILE-nomfa\\]" "$HOME/.aws/credentials" >/dev/null 2>&1; then
-        test "$debug" = 1 && echo "matched -nomfa" 1>&2
-        aws_profile="$AWS_PROFILE-nomfa"
-    elif grep "^\\[$AWS_PROFILE-mfa\\]" "$HOME/.aws/credentials" >/dev/null 2>&1; then
-        test "$debug" = 1 && echo "matched -mfa" 1>&2
-        aws_profile="$AWS_PROFILE"
-    else
-        aws_profile=default
-    fi
-fi
-if test -z "${aws_profile_mfa}"; then
-    case ${aws_profile} in
-        *-nomfa) aws_profile_mfa=${aws_profile%-nomfa} ;;
-        *)       aws_profile_mfa=${aws_profile}-mfa ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -d|--debug)
+            debug=1;
+            shift;
+            ;;
+        -m=*|--mode=*)
+            mode="${1#*=}"
+            shift
+            ;;
+        -m|--mode)
+            mode="$2"
+            shift 2;
+            ;;
+        --)
+            break
+            ;;
+        -*)
+            echo "unknown option $1" 1>2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
     esac
+done
+
+if test $# -eq 1 -a -n "$1"; then
+    aws_profile="$1"
+elif test -n "$AWS_PROFILE"; then
+    aws_profile="$AWS_PROFILE"
+else
+    echo "aws profile not specified and AWS_PROFILE is not set" 1>&2; exit 1
 fi
-test "$debug" = 1 && echo "aws_profile=$aws_profile aws_profile_mfa=$aws_profile_mfa" 1>&2
+test "$debug" = 1 && echo "aws_profile=$aws_profile" 1>&2
 
 if test -z "$arn"; then
     arn="$(aws configure get arn --profile $aws_profile)" || { echo "arn is not set in $aws_profile" 1>&2; exit 1; }
@@ -128,7 +132,7 @@ esac
 test $? -eq 0 || exit 1
 
 # Fetch the AWS session token.
-cmd=(aws sts get-session-token --duration-seconds "$duration" --serial-number "$arn" --token-code "$totp" --profile "$aws_profile")
+cmd=(aws --profile "${aws_profile}-nomfa" sts get-session-token --duration-seconds "$duration" --serial-number "$arn" --token-code "$totp")
 test "$debug" = 1 && echo "${cmd[@]}" 1>&2
 "${cmd[@]}" | \
 jq -r '.Credentials | "aws_access_key_id \(.AccessKeyId)\naws_secret_access_key \(.SecretAccessKey)\naws_session_token \(.SessionToken)"' | \
@@ -139,7 +143,7 @@ while read awskey awsval; do
             echo "export $awskey='$awsval'"
             ;;
         config)
-            aws configure set "$awskey" "$awsval" --profile $aws_profile_mfa
+            aws --profile "$aws_profile" configure set "$awskey" "$awsval"
             ;;
     esac
 done
