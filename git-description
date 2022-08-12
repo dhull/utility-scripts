@@ -3,6 +3,14 @@
 use strict;
 use warnings;
 
+use Getopt::Long;
+
+my $reverse = 0;
+
+GetOptions(
+  'reverse!' => \$reverse,
+) or die "bad option";
+
 my $branch = $ARGV[0];
 
 open(my $fh, '-|', 'git', 'log', '--decorate=short', $branch || ()) or die;
@@ -20,6 +28,9 @@ use constant {
   BEFORE_PARAGRAPH => 1,
   IN_PARAGRAPH => 2,
 };
+
+my @all_messages;
+my $current_message = '';
 
 my $state = BEFORE_COMMIT;
 commit:
@@ -54,6 +65,11 @@ while (my $l = <$fh>) {
   # Commit messages are indented by 4 spaces in git log output.
   if ($l =~ s/^    //) {
     if ($state == BEFORE_COMMIT) {
+      if ($current_message) {
+        push(@all_messages, $current_message);
+        $current_message = '';
+      }
+
       # We've found the start of a new commit message.  Everything else will
       # be indented four spaces so that it be indented under this bullet.
       $l = "\n* $l";
@@ -85,12 +101,25 @@ while (my $l = <$fh>) {
       $l = ($state == IN_PARAGRAPH ? ' ' : '    ') . $l;
       $state = IN_PARAGRAPH;
     }
-    print $l;
+
+    $current_message .= $l;
   }
+}
+
+if ($current_message) {
+  push(@all_messages, $current_message);
+  $current_message = '';
 }
 
 # Ignore the exit value from close because git will complain because we close
 # it without reading the entire git log.
 close($fh);
+
+if ($reverse) {
+  @all_messages = reverse(@all_messages);
+}
+
+print @all_messages, "\n";
+
 exit(0);
 
