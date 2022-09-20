@@ -1,0 +1,14 @@
+#! /bin/bash
+
+if ! test -d venv3; then
+   python3 -m venv venv3
+fi
+
+source venv3/bin/activate
+
+if ! test -f requirements.txt; then
+  pip install boto3 requests requests-aws4auth
+  pip freeze >requirements.txt
+else
+  pip install -r requirements.txt
+fi
