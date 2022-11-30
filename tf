@@ -1,5 +1,21 @@
 #! /bin/sh
 
+if ! test -f main.tf; then
+    echo "not a terraform directory" 1>&2; exit 1
+fi
+
+tfversion=0.12.31
+required_version="$(perl -n -e 'm/required_version\s*=[^\d]*(\d[\.\d]+)/ and do { print $1; exit; }' versions.tf)"
+case "$required_version" in
+     0.12|0.12.*)       tfversion=0.12.31 ;;
+     0.13|0.13.*)       tfversion=0.13.7 ;;
+     1.2.8)             tfversion=1.2.8 ;;
+     *)
+         echo "unknown required_version value \"$required_version\"" 1>&2
+         exit 1
+         ;;
+esac
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
          -e=*|--environment=*)
@@ -8,6 +24,14 @@ while [[ $# -gt 0 ]]; do
              ;;
          -e|--environment)
              fbotenv="$2"
+             shift 2
+             ;;
+         -t=*|--tfversion=*)
+             tfversion="${i#*=}"
+             shift
+             ;;
+         -t|--terraform-version)
+             tfversion="$2"
              shift 2
              ;;
          --)
@@ -23,11 +47,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if ! test -f main.tf; then
-    if test -f  "$fbotenv/main.tf"; then
-        echo "unrecognized layout; maybe you meant to do \"apex -e $fbotenv infra $@\"?" 1>&2; exit 1
-    fi
-    echo "not a terraform directory" 1>&2; exit 1
+TERRAFORM="terraform-$tfversion"
+if test "$(type -t "$TERRAFORM")" != file; then
+   echo "could not find $TERRAFORM" 1>&2; exit 1
 fi
 
 if test -z "$fbotenv"; then
@@ -68,50 +90,79 @@ function run {
     "$@"
 }
 
+function runexec {
+    echo "$@" 1>&2
+    exec "$@"
+}
+
 command="$1"
 shift
 case "$command" in
      init)
-         case $(pwd) in
-              */fbt-infrastructure)
-                  bucket="bucket=fbt-remote-state-infrastructure-$AWS_ACCOUNT_ID"
-                  key="key=terraform.fbt-infrastructure.tfstate"
-                  ;;
-              */fbt-long-job/terraform)
-                  bucket="bucket=fbt-remote-state-$AWS_ACCOUNT_ID"
-                  key="key=terraform.fbt-long-job.tfstate"
-                  ;;
-              */fbt-proxy/terraform)
-                  bucket="bucket=fbt-remote-state-$AWS_ACCOUNT_ID"
-                  key="key=terraform.fbt-proxy.tfstate"
-                  ;;
-              */fbt-event/infrastructure)
-                  bucket="bucket=fbot-${fbotenv}-state"
-                  key="key=terraform.fbt_event.tfstate"
-                  ;;
-              */fbt-reward/infrastructure)
-                  bucket="bucket=fbot-${fbotenv}-state"
-                  key="key=terraform.fbt_reward.tfstate"
-                  ;;
-              *)
-                  echo "unknown dir; maybe use apex?" 1>&2; exit 1 ;;
-         esac
+         if test -f "${fbotenv}.tfvars" -a -f common.tfvars; then
+             init_args=$(
+                 perl -n \
+                      -e 'BEGIN { %KEYS = map(($_ => 1), qw( bucket profile key region )) }' \
+                      -e 'm/^([\S]*)\s*=\s*\"(.*)\"/ and $KEYS{$1} and push(@v, "-backend-config=$1=$2");' \
+                      -e 'END { print join(" ", @v) }' \
+                      "${fbotenv}.tfvars" common.tfvars
+                      )
+             #init_args="-backend-config=${fbotenv}.tfvars -backend-config=common.tfvars"
+         else
+             pwd="$(pwd)"
+             echo "$pwd"
+             case "$pwd" in
+                  */fbt-infrastructure)
+                      bucket="fbt-remote-state-infrastructure-$AWS_ACCOUNT_ID"
+                      key=terraform.fbt-infrastructure.tfstate
+                      ;;
+                  */fbt-long-job/terraform)
+                      bucket="fbt-remote-state-$AWS_ACCOUNT_ID"
+                      key=terraform.fbt-long-job.tfstate
+                      ;;
+                  */fbt-proxy/terraform)
+                      bucket="fbt-remote-state-$AWS_ACCOUNT_ID"
+                      key=terraform.fbt-proxy.tfstate
+                      ;;
+                  */fbt-event/infrastructure)
+                      bucket="fbot-${fbotenv}-state"
+                      key=terraform.fbt_event.tfstate
+                      ;;
+                  */fbt-reward/infrastructure)
+                      bucket="fbot-${fbotenv}-state"
+                      key=terraform.fbt_reward.tfstate
+                      ;;
+                  */fbt-*/infrastructure)
+                      service=$(perl -e '$ENV{PWD} =~ m,/(fbt-.*?)/, and print $1')
+                      bucket="fbot-${fbotenv}-state"
+                      key=terraform.$service.tfstate
+                      echo "$service"
+                      ;;
+                  *)
+                      echo "unknown dir; maybe use apex?" 1>&2; exit 1 ;;
+             esac
+             init_args="-backend-config=bucket=$bucket -backend-config=key=$key -backend-config=region=us-east-1 -backend-config=profile=$AWS_PROFILE"
+         fi
 
          # terraform init -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
          run rm -rf ".terraform"
-         run terraform init \
-                   -backend-config="$bucket" \
-                   -backend-config="$key" \
-                   -backend-config="region=us-east-1" \
-                   -backend-config="profile=$AWS_PROFILE" \
+         runexec $TERRAFORM init $init_args \
                    -backend=true \
                    -force-copy \
                    -get=true "$@"
          ;;
-     plan|apply|graph)
-         run terraform $command -var 'image_sha=' -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
+     plan|apply|graph|destroy)
+         var_args=
+         if egrep image_sha variables.tf >/dev/null 2>&1; then
+             var_args="-var image_sha="
+         fi
+         runexec $TERRAFORM $command $var_args -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
          ;;
      *)
          echo "unknown command \"$command\"" 1>&2; exit 1
          ;;
 esac
+
+# AWS_PROFILE= terraform import -var-file production.tfvars module.pub_lambda.aws_lambda_function.lamdbda fbt-account_api
+# AWS_PROFILE= terraform import -var-file production.tfvars module.pub_lambda.aws_lambda_function.lamdbda_alias fbt-account_api
+
