@@ -99,18 +99,28 @@ command="$1"
 shift
 case "$command" in
      init)
-         if test -f "${fbotenv}.tfvars" -a -f common.tfvars; then
+         if test -f "${fbotenv}.tfvars"; then
+             tfvars_files=("${fbotenv}.tfvars")
+             if test -f common.tfvars; then tfvars_files+=common.tfvars; fi
              init_args=$(
                  perl -n \
                       -e 'BEGIN { %KEYS = map(($_ => 1), qw( bucket profile key region )) }' \
                       -e 'm/^([\S]*)\s*=\s*\"(.*)\"/ and $KEYS{$1} and push(@v, "-backend-config=$1=$2");' \
                       -e 'END { print join(" ", @v) }' \
-                      "${fbotenv}.tfvars" common.tfvars
+                      "${tfvars_files[@]}"
                       )
              #init_args="-backend-config=${fbotenv}.tfvars -backend-config=common.tfvars"
          else
              pwd="$(pwd)"
              echo "$pwd"
+
+             # Defaults for all services.
+             service=$(perl -e '$ENV{PWD} =~ m,/(fbt-.*?)/, and print $1')
+             bucket="fbot-${fbotenv}-state"
+             key=terraform.$service.tfstate
+             profile="profile=$AWS_PROFILE";
+
+             # Overrides for specific services.
              case "$pwd" in
                   */fbt-infrastructure)
                       bucket="fbt-remote-state-infrastructure-$AWS_ACCOUNT_ID"
@@ -124,24 +134,16 @@ case "$command" in
                       bucket="fbt-remote-state-$AWS_ACCOUNT_ID"
                       key=terraform.fbt-proxy.tfstate
                       ;;
-                  */fbt-event/infrastructure)
-                      bucket="fbot-${fbotenv}-state"
-                      key=terraform.fbt_event.tfstate
+                  */fbt-account/infrastructure)
+                      profile=
                       ;;
-                  */fbt-reward/infrastructure)
-                      bucket="fbot-${fbotenv}-state"
-                      key=terraform.fbt_reward.tfstate
-                      ;;
-                  */fbt-*/infrastructure)
-                      service=$(perl -e '$ENV{PWD} =~ m,/(fbt-.*?)/, and print $1')
-                      bucket="fbot-${fbotenv}-state"
-                      key=terraform.$service.tfstate
-                      echo "$service"
+                  */fbt-account/infrastructure)
                       ;;
                   *)
                       echo "unknown dir; maybe use apex?" 1>&2; exit 1 ;;
              esac
-             init_args="-backend-config=bucket=$bucket -backend-config=key=$key -backend-config=region=us-east-1 -backend-config=profile=$AWS_PROFILE"
+             #  -backend-config=key=$key -backend-config=region=us-east-1 $profile"
+             init_args="-backend-config=bucket=$bucket"
          fi
 
          # terraform init -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
