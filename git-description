@@ -72,7 +72,7 @@ while (my $l = <$fh>) {
 
       # We've found the start of a new commit message.  Everything else will
       # be indented four spaces so that it be indented under this bullet.
-      $l = "\n* $l";
+      $l = "* $l";
       $state = BEFORE_PARAGRAPH;
     } elsif ($l eq '') {
       # We've found a blank line; start a new paragraph.
@@ -115,11 +115,13 @@ if ($current_message) {
 # it without reading the entire git log.
 close($fh);
 
+map { s/\n*\z/\n/ } @all_messages;
+
 if ($reverse) {
   @all_messages = reverse(@all_messages);
 }
 
-print @all_messages, "\n";
+print join("\n", @all_messages);
 
 exit(0);
 
