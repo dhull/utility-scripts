@@ -1,0 +1,163 @@
+#! /bin/bash
+
+# Controls whether the script:
+# * 0: fetches the secret from AWS SecretsManager and passes it as
+#      DATADOG_API_KEY, or
+# * 1: passes DATADOG_API_KEY_SECRET_ARN for the lambda to fetch itself.
+use_secretsmanager=0
+
+# datadog-ci is checked out and built in this directory.
+# https://github.com/DataDog/datadog-ci/tree/master/src/commands/lambda
+DATADOG_DIR=$HOME/src/datadog-ci
+
+command="$1"
+service="$2"
+shift 2
+if test -z "$command" -o -z "$service"; then
+    echo "COMMAND ('instrument' or 'uninstrument') and SERVICE required: $0 COMMAND SERVICE OTHER_ARGS" 1>&2; exit 1
+fi
+
+set -e          # Exit script immediately on command failure.
+
+# Default AWS_PROFILE to fbot-sandbox.
+: ${AWS_PROFILE:=fbot-sandbox}
+export AWS_PROFILE
+
+if test "$use_secretsmanager" -eq 0; then
+    echo "USING DATADOG_API_KEY"
+    export DATADOG_API_KEY=$(aws secretsmanager get-secret-value --secret-id DATADOG_API_KEY --query SecretString --output text)
+else
+    echo "USING DATADOG_API_KEY_SECRET_ARN"
+    case "$AWS_PROFILE" in
+        fbot-production)
+            export DATADOG_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:644084073510:secret:DATADOG_API_KEY-FxAbsS
+            fbot_environment=production
+            ;;
+        fbot-sandbox)
+            export DATADOG_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:627208980326:secret:DATADOG_API_KEY-tqv1aJ
+            fbot_environment=sandbox
+            ;;
+        *)
+            echo "unknown AWS_PROFILE ${AWS_PROFILE}" 1>&2; exit 1
+    esac
+fi
+
+export DATADOG_SITE=datadoghq.com
+
+GIT_HASH=$(cd $HOME/src/fb/fbt-reward; git rev-parse HEAD)
+
+#export DD_API_KEY=$DATADOG_API_KEY
+
+cd "$DATADOG_DIR"
+
+args=(
+    --region us-east-1
+
+    --functions-regex "^${service}_"
+
+    # Use --env to separate out your staging, development, and production environments.
+    # https://docs.datadoghq.com/serverless/guide/serverless_tagging/#the-env-tag
+    --env "$fbot_environment"
+
+    # Use --service to group related functions belonging to similar workloads.
+    # https://docs.datadoghq.com/serverless/guide/serverless_tagging/#the-service-tag
+    --service "$service"
+  
+    # Add the version tag to enable Deployment Tracking.
+    # The terraform config uses the git hash, and so do we.
+    # https://docs.datadoghq.com/serverless/guide/serverless_tagging/#the-version-tag
+    --version $GIT_HASH
+
+    # datadog-lambda-js releases (--layer-version|-v):
+    #   77 corresponds to v5.77.0
+    #   https://github.com/DataDog/datadog-lambda-js/releases
+    --layer-version 77
+
+    # datadog-lambda-extension releases (--extension-version|-e):
+    #   https://github.com/DataDog/datadog-lambda-extension/releases
+    --extension-version 22
+)
+
+yarn datadog-ci lambda "$command" "$@" "${args[@]}"
+
+# NOTES
+#
+# * Bad permissions for DATADOG_API_KEY_SECRET_ARN and no DATADOG_API_KEY
+#   apparently *did* prevent events from being sent.
+#
+# 2023-03-22 15:55:08 UTC | DD_EXTENSION | ERROR | Error while trying to read an API Key from Secrets Manager: Secrets Manager read error: AccessDeniedException: User: arn:aws:sts::627208980326:assumed-role/fbt-reward_lambda_function/fbt-reward_event is not authorized to perform: secretsmanager:GetSecretValue on resource: arn:aws:secretsmanager:us-east-1:627208980326:secret:DATADOG_API_KEY-tqv1aJ because no identity-based policy allows the secretsmanager:GetSecretValue action
+#
+#
+# aws lambda get-function --function-name fbt-reward_retry --query Configuration
+#
+# INSTRUMENTED CONFIG
+#     {
+#       "FunctionName": "arn:aws:lambda:us-east-1:627208980326:function:fbt-reward_retry",
+#       "Handler": "/opt/nodejs/node_modules/datadog-lambda-js/handler.handler",
+#       "Environment": {
+#         "Variables": {
+#           "DD_API_KEY": "****6054",
+#           "DD_CAPTURE_LAMBDA_PAYLOAD": "false",
+#           "DD_ENV": "sandbox",
+#           "DD_LAMBDA_HANDLER": "index.retryHandler",
+#           "DD_MERGE_XRAY_TRACES": "false",
+#           "DD_SERVICE": "fbt-reward",
+#           "DD_SITE": "datadoghq.com",
+#           "DD_TAGS": "git.commit.sha:6b1b555e982d576fe7bca735955497a5f163a330,git.repository_url:github.com/DataDog/datadog-ci.git",
+#           "DD_TRACE_ENABLED": "true",
+#           "DD_VERSION": "42eb88e4a9dabbd5e912cd6a067c20df2cd98a71",
+#           "FBT_AWS_ACCOUNT_ID": "627208980326",
+#           "FBT_AWS_REGION": "us-east-1",
+#           "FBT_NODE_ENV": "development",
+#           "LAMBDA_FUNCTION_NAME": "fbt-reward_retry",
+#           "SDK_LAMBDA_VERSION": "current"
+#         }
+#       },
+#       "Layers": [
+#         "arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension:22",
+#         "arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node14-x:77"
+#       ]
+#     }
+# {
+#   "FunctionName": "arn:aws:lambda:*********:************:function:fbt-reward_sdk",
+#   "Handler": "/opt/nodejs/node_modules/datadog-lambda-js/handler.handler",
+#   "Environment": {
+#     "Variables": {
+#       "SDK_LAMBDA_VERSION": "current",
+#       "FBT_AWS_REGION": "*********",
+#       "FBT_NODE_ENV": "***********",
+#       "FBT_AWS_ACCOUNT_ID": "************",
+#       "LAMBDA_FUNCTION_NAME": "fbt-reward_sdk",
+#       "DD_LAMBDA_HANDLER": "index.sdkHandler",
+#       "DD_API_KEY": "********************************",
+#       "DD_SITE": "datadoghq.com",
+#       "DD_CAPTURE_LAMBDA_PAYLOAD": "false",
+#       "DD_ENV": "*******",
+#       "DD_MERGE_XRAY_TRACES": "false",
+#       "DD_SERVICE": "fbt-reward",
+#       "DD_TRACE_ENABLED": "true",
+#       "DD_VERSION": "36aa844514b4eeab8d0c2404b95bbc8e2fc43129"
+#     }
+#   },
+#   "Layers": [
+#     "arn:aws:lambda:*********:464622532012:layer:Datadog-Extension:22",
+#     "arn:aws:lambda:*********:464622532012:layer:Datadog-Node14-x:77"
+#   ]
+# }
+
+#
+# UNINSTRUMENTED CONFIG
+#     {
+#       "FunctionName": "arn:aws:lambda:us-east-1:627208980326:function:fbt-reward_retry",
+#       "Handler": "index.retryHandler",
+#       "Environment": {
+#         "Variables": {
+#           "FBT_AWS_ACCOUNT_ID": "627208980326",
+#           "FBT_AWS_REGION": "us-east-1",
+#           "FBT_NODE_ENV": "development",
+#           "LAMBDA_FUNCTION_NAME": "fbt-reward_retry",
+#           "SDK_LAMBDA_VERSION": "current"
+#         }
+#       },
+#       "Layers": []
+#     }
