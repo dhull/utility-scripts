@@ -1,170 +1,217 @@
-#! /bin/sh
+#! /usr/bin/perl
 
-if ! test -f main.tf; then
-    echo "not a terraform directory" 1>&2; exit 1
-fi
+# From Bryant, for 0.12 to 1.4.6 direct terraform upgrade:
+# AWS_PROFILE=qa terraform146 state replace-provider registry.terraform.io/-/archive registry.terraform.io/hashicorp/archive
+# AWS_PROFILE=qa terraform146 state replace-provider registry.terraform.io/-/aws registry.terraform.io/hashicorp/aws
 
-tfversion=0.12.31
-required_version="$(perl -n -e 'm/required_version\s*=[^\d]*(\d[\.\d]+)/ and do { print $1; exit; }' versions.tf)"
-case "$required_version" in
-     0.12|0.12.*)       tfversion=0.12.31 ;;
-     0.13|0.13.*)       tfversion=0.13.7 ;;
-     1.2.8)             tfversion=1.2.8 ;;
-     *)
-         echo "unknown required_version value \"$required_version\"" 1>&2
-         exit 1
-         ;;
-esac
+use autodie;
+use strict;
+use warnings;
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-         -e=*|--environment=*)
-             fbotenv="${i#*=}"
-             shift
-             ;;
-         -e|--environment)
-             fbotenv="$2"
-             shift 2
-             ;;
-         -t=*|--tfversion=*)
-             tfversion="${i#*=}"
-             shift
-             ;;
-         -t|--terraform-version)
-             tfversion="$2"
-             shift 2
-             ;;
-         --)
-             break
-             ;;
-         -*)
-             echo "unknown option $1" 1>2
-             exit 1
-             ;;
-         *)
-             break
-             ;;
-    esac
-done
+use File::Slurp;
+use Getopt::Long;
+use Pod::Usage;
+use YAML::XS;
 
-TERRAFORM="terraform-$tfversion"
-if test "$(type -t "$TERRAFORM")" != file; then
-   echo "could not find $TERRAFORM" 1>&2; exit 1
-fi
+# use JSON::XS;
 
-if test -z "$fbotenv"; then
-    branch="$(git rev-parse --abbrev-ref HEAD)"
-    case "$branch" in
-         master)
-             fbotenv=production ;;
-         sandbox|qa|applause|staging)
-             fbotenv="$branch" ;;
-         *)
-             echo "unknown branch \"$branch\". Please specify an --environment" 1>&2; exit 1 ;;
-    esac
-fi
-if ! test -f "$fbotenv.tfvars"; then
-    echo "unknown fbotenv \"$fbotenv\"" 1>&2
-    exit 1
-fi
+my $context;
 
-export AWS_PROFILE="fbot-${fbotenv}"
-export AWS_ACCOUNT_ID=$(aws configure get arn | perl -n -e 'm/iam::(\d+)/ and print $1')
-if test -z "$AWS_ACCOUNT_ID"; then echo "AWS_ACCOUNT_ID not found" 1>&2; exit 1; fi
-export AWS_REGION=$(aws configure get region)
-if test -z "$AWS_REGION"; then echo "AWS_REGION not found" 1>&2; exit 1; fi
+GetOptions(
+  'context=s' => \$context,
+) or pod2usage(-exitval => 2, -output => \*STDERR);
 
-if type -p figlet >/dev/null; then
-    # Figlet is a program for writing banners to the terminal.
-    figlet -k "$fbotenv"
-else
-    echo "\n${fbotenv}\n" | tr a-z A-Z
-fi
-
-echo "AWS_PROFILE=$AWS_PROFILE"
-echo "AWS_ACCOUNT_ID=$AWS_ACCOUNT_ID"
-echo "AWS_REGION=$AWS_REGION"
-
-function run {
-    echo "$@" 1>&2
-    "$@"
+if (! -f "main.tf") {
+  print STDERR "not a terraform directory\n";
+  exit(1);
 }
 
-function runexec {
-    echo "$@" 1>&2
-    exec "$@"
+if (! $context) {
+  $context = get_context_from_branch();
 }
 
-command="$1"
-shift
-case "$command" in
-     init)
-         if test -f "${fbotenv}.tfvars"; then
-             tfvars_files=("${fbotenv}.tfvars")
-             if test -f common.tfvars; then tfvars_files+=common.tfvars; fi
-             init_args=$(
-                 perl -n \
-                      -e 'BEGIN { %KEYS = map(($_ => 1), qw( bucket profile key region )) }' \
-                      -e 'm/^([\S]*)\s*=\s*\"(.*)\"/ and $KEYS{$1} and push(@v, "-backend-config=$1=$2");' \
-                      -e 'END { print join(" ", @v) }' \
-                      "${tfvars_files[@]}"
-                      )
-             #init_args="-backend-config=${fbotenv}.tfvars -backend-config=common.tfvars"
-         else
-             pwd="$(pwd)"
-             echo "$pwd"
+if (-x '/usr/local/bin/figlet') {
+  # Figlet is a program for writing banners to the terminal.
+  system('figlet', '-k', $context);
+} else {
+  print "\n${uc($context)}\n";
+}
 
-             # Defaults for all services.
-             service=$(perl -e '$ENV{PWD} =~ m,/(fbt-.*?)/, and print $1')
-             bucket="fbot-${fbotenv}-state"
-             key=terraform.$service.tfstate
-             profile="profile=$AWS_PROFILE";
+$ENV{AWS_PROFILE} = "fbot-$context";
+$ENV{AWS_DEFAULT_REGION} = "us-east-1";
+$ENV{FBT_AWS_ACCOUNT_ID} = ({
+  sandbox       => '627208980326',
+  qa            => '755386480951',
+  staging       => '913709512847',
+  production    => '644084073510',
+})->{$context};
 
-             # Overrides for specific services.
-             case "$pwd" in
-                  */fbt-infrastructure)
-                      bucket="fbt-remote-state-infrastructure-$AWS_ACCOUNT_ID"
-                      key=terraform.fbt-infrastructure.tfstate
-                      ;;
-                  */fbt-long-job/terraform)
-                      bucket="fbt-remote-state-$AWS_ACCOUNT_ID"
-                      key=terraform.fbt-long-job.tfstate
-                      ;;
-                  */fbt-proxy/terraform)
-                      bucket="fbt-remote-state-$AWS_ACCOUNT_ID"
-                      key=terraform.fbt-proxy.tfstate
-                      ;;
-                  */fbt-account/infrastructure)
-                      profile=
-                      ;;
-                  */fbt-account/infrastructure)
-                      ;;
-                  *)
-                      echo "unknown dir; maybe use apex?" 1>&2; exit 1 ;;
-             esac
-             #  -backend-config=key=$key -backend-config=region=us-east-1 $profile"
-             init_args="-backend-config=bucket=$bucket"
-         fi
+my $circleci_file = find_first(
+  sub { -f $_[0] },
+  [ '.circleci/config.yml', '../.circleci/config.yml' ]
+);
+print STDERR "found config $circleci_file\n";
+my $circleci_yaml = File::Slurp::read_file($circleci_file);
+my $circleci_config = YAML::XS::Load($circleci_yaml) or die;
 
-         # terraform init -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
-         run rm -rf ".terraform"
-         runexec $TERRAFORM init $init_args \
-                   -backend=true \
-                   -force-copy \
-                   -get=true "$@"
-         ;;
-     plan|apply|graph|destroy)
-         var_args=
-         if egrep image_sha variables.tf >/dev/null 2>&1; then
-             var_args="-var image_sha="
-         fi
-         runexec $TERRAFORM $command $var_args -var-file=${AWS_PROFILE#fbot-}.tfvars "$@"
-         ;;
-     *)
-         echo "unknown command \"$command\"" 1>&2; exit 1
-         ;;
-esac
+# print JSON::XS::encode_json($circleci_config);
+# print JSON::XS::encode_json($circleci_config->{jobs}->{deploy}->{steps}), "\n\n";
 
-# AWS_PROFILE= terraform import -var-file production.tfvars module.pub_lambda.aws_lambda_function.lamdbda fbt-account_api
-# AWS_PROFILE= terraform import -var-file production.tfvars module.pub_lambda.aws_lambda_function.lamdbda_alias fbt-account_api
+my $tf_action = shift(@ARGV);
+my $tf_program = terraform_program();
+
+my $tf_cmd = find_command(
+  $circleci_config,
+  $tf_action eq 'init'
+    ? qr/^terraform\s+init/
+    : qr/^terraform\s+apply/);
+print STDERR "tf_cmd: $tf_cmd\n";
+
+# Hacky way to get shell to expand env vars, remove quotes.
+$ENV{CONTEXT} = $context;
+chomp($tf_cmd = `echo $tf_cmd`);
+
+print STDERR "1: $tf_cmd\n";
+
+
+my %remove_arg = (
+  '-reconfigure' => 1,
+  '-auto-approve' => 1,
+);
+
+my %add_args = (
+  init => [ '-backend=true', '-force-copy', '-get=true' ],
+);
+
+my @tf_args = grep({ ! exists $remove_arg{$_} } split(m/\s+/, $tf_cmd));
+
+# @tf_args = map(var_expand($_, CONTEXT => $context, CIRCLE_SHA1 => ''), @tf_args);
+splice(@tf_args, 0, 2);
+
+my @add_args = exists $add_args{$tf_action} ? @{$add_args{$tf_action}} : ();
+
+if ($tf_action eq 'init') {
+  system('rm', '-rf', '.terraform');
+}
+
+my @cmd = ($tf_program, $tf_action, @tf_args, @add_args, @ARGV);
+
+print STDERR "2: ", join(' ', @cmd), "\n";
+exec(@cmd);
+# If we get here then the exec failed.
+exit(1);
+
+########################################################################
+
+sub terraform_program {
+  my $tfversion = '0.12.31';
+
+  my %versions = (
+    '0.12' => '0.12.31',
+    '0.13' => '0.13.7',
+    '1.2'  => '1.2.8',
+    '1.4'  => '1.4.6',
+  );
+
+  open(my $fh, '<', 'versions.tf') or die "versions.tf not found\n";
+  while (my $l = <$fh>) {
+    $l =~ m/required_version\s*=[^\d]*(\d+\.\d+)/ and do {
+      if (! exists $versions{$1}) {
+        die "no matching terraform version for $1 found\n";
+      }
+      $tfversion = $versions{$1};
+      last;
+    };
+  }
+  close($fh);
+
+  return "terraform-$tfversion";
+}
+
+sub get_context_from_branch {
+  my $branch = `git rev-parse --abbrev-ref HEAD`;
+  chomp($branch);
+
+  my %context = (
+    master      => 'production',
+    sandbox     => 'sandbox',
+    qa          => 'qa',
+    staging     => 'staging',
+  );
+
+  if (! exists $context{$branch}) {
+    die "unknown context for \"$branch\" branch\n";
+  }
+
+  return $context{$branch};
+}
+
+sub var_expand {
+  my ($var, %repl) = @_;
+  $var =~ s/\$(?:\{([^\}]+)\}|(\w+))/$repl{$1 || $2}/g;
+  return $var;
+}
+
+sub hash_descend {
+  my $hr = shift(@_);
+
+  while (scalar(@_) > 0) {
+    ref($hr) eq 'HASH' or return undef;
+    my $key = shift(@_);
+    defined $hr->{$key} or return undef;
+    $hr = $hr->{$key};
+  }
+
+  return $hr;
+}
+
+sub find_first {
+  my ($test, $list) = @_;
+  foreach my $entry (@$list) {
+    if ($test->($entry)) {
+      return $entry;
+    }
+  }
+  return undef;
+}
+
+# Look in the circleci config to find the arguments for the terraform command.
+sub find_command {
+  my ($config, $pattern) = @_;
+
+ step:
+  foreach my $step (
+    @{$config->{jobs}->{deploy}->{steps}},
+    @{$config->{aliases}}
+  ) {
+    ref($step) eq 'HASH' or next step;
+    my $command = hash_descend($step, 'run', 'command');
+    if ($command && $command =~ $pattern) {
+      return $command;
+    }
+  }
+  return undef;
+}
+
+__END__
+
+=head1 NAME
+
+tf - Wrapper around terraform for Friendbuy
+
+=head1 SYNOPSIS
+
+tf [-c CONTEXT] [terraform verb] -- [terraform options]
+
+=head1 OPTIONS
+
+=over 4
+
+= item B<-c I<CONTEXT>>
+
+Specify the environment in which to run the terraform command (C<sandbox>,
+C<qa>, C<staging>, or C<production>).  By default, the environment is guessed
+from the current git branch.
+
+=back
 
