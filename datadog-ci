@@ -1,6 +1,8 @@
 #! /bin/bash
 
-# Controls whether the script:
+# Use `--dry` datadog-ci command-line argument for dry run.
+
+# `use_secretsmanager` controls whether the script:
 # * 0: fetches the secret from AWS SecretsManager and passes it as
 #      DATADOG_API_KEY, or
 # * 1: passes DATADOG_API_KEY_SECRET_ARN for the lambda to fetch itself.
@@ -23,6 +25,18 @@ set -e          # Exit script immediately on command failure.
 : ${AWS_PROFILE:=fbot-sandbox}
 export AWS_PROFILE
 
+fbot_environment=${AWS_PROFILE#fbot-}
+
+case "$service" in
+    *_*)
+        functions_arg="--function=$service"
+        service="${service%_*}"
+        ;;
+    *)
+        functions_arg="--functions-regex=^${service}_"
+        ;;
+esac
+
 if test "$use_secretsmanager" -eq 0; then
     echo "USING DATADOG_API_KEY"
     export DATADOG_API_KEY=$(aws secretsmanager get-secret-value --secret-id DATADOG_API_KEY --query SecretString --output text)
@@ -31,11 +45,9 @@ else
     case "$AWS_PROFILE" in
         fbot-production)
             export DATADOG_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:644084073510:secret:DATADOG_API_KEY-FxAbsS
-            fbot_environment=production
             ;;
         fbot-sandbox)
             export DATADOG_API_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:627208980326:secret:DATADOG_API_KEY-tqv1aJ
-            fbot_environment=sandbox
             ;;
         *)
             echo "unknown AWS_PROFILE ${AWS_PROFILE}" 1>&2; exit 1
@@ -53,7 +65,7 @@ cd "$DATADOG_DIR"
 args=(
     --region us-east-1
 
-    --functions-regex "^${service}_"
+    "$functions_arg"
 
     # Use --env to separate out your staging, development, and production environments.
     # https://docs.datadoghq.com/serverless/guide/serverless_tagging/#the-env-tag
@@ -71,12 +83,16 @@ args=(
     # datadog-lambda-js releases (--layer-version|-v):
     #   77 corresponds to v5.77.0
     #   https://github.com/DataDog/datadog-lambda-js/releases
-    --layer-version 77
+    #--layer-version 77
+    --layer-version 91
 
     # datadog-lambda-extension releases (--extension-version|-e):
     #   https://github.com/DataDog/datadog-lambda-extension/releases
-    --extension-version 22
+    #--extension-version 22
+    --extension-version 43
 )
+
+echo yarn datadog-ci lambda "$command" "$@" "${args[@]}"
 
 yarn datadog-ci lambda "$command" "$@" "${args[@]}"
 
