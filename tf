@@ -1,8 +1,21 @@
 #! /usr/bin/perl
 
+# Restrict resource that changes are applied to with `-target=RESOURCE`,
+# e.g., `tf -c sandbox apply -- -target=module.circleci.aws_iam_policy.circleci`
+
 # From Bryant, for 0.12 to 1.4.6 direct terraform upgrade:
 # AWS_PROFILE=qa terraform146 state replace-provider registry.terraform.io/-/archive registry.terraform.io/hashicorp/archive
 # AWS_PROFILE=qa terraform146 state replace-provider registry.terraform.io/-/aws registry.terraform.io/hashicorp/aws
+
+# ADVICE ON USING "TERRAFORM IMPORT"
+#
+# - Create a terraform resource that describes the infrastructure you want to import.
+# - Run "terraform plan" to determine the target name for that resource.
+# - Run "terraform import ADDRESS ID".
+#   https://developer.hashicorp.com/terraform/cli/v1.4.x/commands/import
+#   - ADDRESS is the target name from "terraform plan"
+#   - ID is a resource specific id; for dynamodb tables it is table name.
+#   tf -e sandbox import -- module.database.module.CustomerTable.aws_dynamodb_table.MemberTier_Customer MemberTier_Customer
 
 use autodie;
 use strict;
@@ -18,7 +31,7 @@ use YAML::XS;
 my $context;
 
 GetOptions(
-  'context=s' => \$context,
+  'context|e=s' => \$context,
 ) or pod2usage(-exitval => 2, -output => \*STDERR);
 
 if (! -f "main.tf") {
@@ -186,8 +199,12 @@ sub find_command {
   ) {
     ref($step) eq 'HASH' or next step;
     my $command = hash_descend($step, 'run', 'command');
-    if ($command && $command =~ $pattern) {
-      return $command;
+    # print "find_command: $pattern $command\n";
+    if ($command) {
+      $command =~ s/^cd\s+\w+\s*(?:\&\&|\;)\s*//;
+      if ($command =~ $pattern) {
+        return $command;
+      }
     }
   }
   return undef;
