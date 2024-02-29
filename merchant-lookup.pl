@@ -9,6 +9,7 @@ use Getopt::Long;
 use JSON::XS qw( decode_json encode_json );
 use LWP::UserAgent;
 use Pod::Usage;
+use Term::ANSIColor qw( colored );
 use URI;
 
 my $merchantId;
@@ -60,6 +61,10 @@ my $data = es_request(
   body => $query,
 );
 
+if (!$data->{hits}->{hits}) {
+  die "no matches found\n";
+}
+
 my @hit = @{$data->{hits}->{hits}};
 
 if (defined $index) {
@@ -78,7 +83,13 @@ if (scalar(@field) > 0) {
 } else {
   my $index = 0;
   foreach my $hit (@hit) {
-    print "$index (score: $hit->{_score}): ", $json->encode($hit->{_source}), "\n";
+    my $source = $hit->{_source};
+    print(
+      "$index (score: $hit->{_score})\n",
+      colored(['bold red'], "NAME $source->{name}"), "\n",
+      colored(['bold red'], "ID   $source->{id}"), "\n",
+      $json->encode($source),
+      "\n");
     $index++;
   }
 }
@@ -87,19 +98,29 @@ exit(0);
 
 ########################################################################
 
+my $ua;
+my %osd_version;
+
 sub kinesis_host {
   my ($environment) = @_;
+
+  if (! exists $osd_version{$environment}) {
+    die "unknown environment ${environment}\n";
+  }
 
   return $environment eq 'production'
     ? 'kibana.fbot.me'
     : "kibana.fbot-${environment}.me";
 }
 
-my $ua;
-
 BEGIN {
   $ENV{PERL_LWP_SSL_VERIFY_HOSTNAME} = 0;
   $ua = LWP::UserAgent->new();
+
+  %osd_version = (
+    production => '2.5.0',
+    sandbox => '2.5.0',
+  );
 }
 
 sub es_request {
@@ -114,7 +135,7 @@ sub es_request {
 #   }
 # }
 
-  my $uri = URI->new("https://${kinesis_host}/_plugin/kibana/api/console/proxy");
+  my $uri = URI->new("https://${kinesis_host}/_dashboards/api/console/proxy");
   $uri->query_form(
     method => $arg{method},
     path => $arg{path},
@@ -123,8 +144,8 @@ sub es_request {
   my $r = $ua->post(
     $uri,
     'Content-Type' => 'application/json',
-    'kbn-version' => '7.10.2',
-    'kbn-xsrf' => 'kibana',
+    'osd-version' => $osd_version{$environment},
+    # 'osd-xsrf' => 'opensearchDashboards',
     Content => encode_json($arg{body}),
   );
 
