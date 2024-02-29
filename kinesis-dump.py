@@ -82,9 +82,10 @@ def dump_stream(stream, profile, **opts):
     shards = client.list_shards(StreamName=stream)
     if debug: print(f'{bcolors.GREY20}shards\n{pp.pformat(shards)}{bcolors.ENDC}', file=sys.stderr)
     shard_count = len(shards['Shards'])
+    shard = opts.get('shard');
     if shard_count > 1:
-        raise Exception(f'shard count {shard_count} > 1 not handled')
-    shard_id = shards['Shards'][0]['ShardId']
+        print(f'{bcolors.WARNING}shard count {shard_count} > 1; dumping {shard}{bcolors.ENDC}', file=sys.stderr)
+    shard_id = shards['Shards'][shard]['ShardId']
 
     if opts.get('start', 0):
         # print(f'using start {opts["start"]}', file=sys.stderr)
@@ -123,15 +124,29 @@ def dump_stream(stream, profile, **opts):
 
         for d in r['Records']:
             n += 1
+
+            d['Data'] = d['Data'].decode('utf-8')
+            d['Data'] = json.loads(d['Data'])
+
             if stream in handler:
                 d = handler[stream](d)
+            # if format != 'python':
+            #     d['Data'] = json.loads(d['Data'])
+            if opts.get('full_event'):
+                # The Kinesis has decoded this into a datetime object; transform it back into a string.
+                d['ApproximateArrivalTimestamp'] = \
+                    d['ApproximateArrivalTimestamp'].astimezone(tz=datetime.timezone.utc).isoformat()
+            else:
+                d = d['Data']
+
             print(f'\n{bcolors.GREY10}record {n}:{bcolors.ENDC}', file=sys.stderr)
             if format == 'python':
-                pp.pprint(json.loads(d['Data']))
+                pp.pprint(d)
             elif format == 'json':
-                sys.stdout.buffer.write(d['Data'])
-                sys.stdout.buffer.write(b'\n')
-                sys.stdout.buffer.flush()
+                print(json.dumps(d, indent=2))
+                # sys.stdout.buffer.write(json.dumps(d))
+                # sys.stdout.buffer.write(b'\n')
+                # sys.stdout.buffer.flush()
             else:
                 raise Exception(f'unknown format ${format}')
         itr = r['NextShardIterator']
@@ -166,6 +181,9 @@ parser.add_argument(
     '--follow', action='store_true',
     help='continue waiting for more data when the end of the stream is reached')
 parser.add_argument(
+    '--shard', type=int, default=0,
+    help='select the shard to dump')
+parser.add_argument(
     '-n', '--limit', type=int,
     help='stop fetching more records when limit is reached')
 time_group = parser.add_mutually_exclusive_group()
@@ -177,6 +195,9 @@ time_group.add_argument(
     help='number of seconds in the past to start fetching data from, with optional suffix m:minutes, h:hours, d:days')
 parser.add_argument(
     '--debug', action='store_true')
+parser.add_argument(
+    '--full-event', action='store_true',
+    help='print the full event including the ApproximateArrivalTimestamp, PartitionKey, and SequenceNumber; otherwise prints the Data only')
 args = parser.parse_args()
 
 debug = args.debug
@@ -187,4 +208,12 @@ if args.start:
 elif args.since:
     start = datetime.datetime.fromtimestamp(time.time() - args.since)
 
-dump_stream(args.stream, profile=args.profile, follow=args.follow, limit=args.limit, start=start, format=args.format)
+dump_stream(
+    args.stream,
+    profile=args.profile,
+    follow=args.follow,
+    shard=args.shard,
+    limit=args.limit,
+    start=start,
+    format=args.format,
+    full_event=args.full_event)
